@@ -259,7 +259,7 @@ class QASystem(object):
         Add train_op to self
         """
         with tf.variable_scope("train_step"):
-            adam_optimizer = tf.train.AdamOptimizer()
+            adam_optimizer = tf.train.AdamOptimizer(0.0005)
             grads, vars = zip(*adam_optimizer.compute_gradients(self.loss))
 
             clip_val = self.config.max_gradient_norm

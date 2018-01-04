@@ -7,11 +7,11 @@ import os
 import json
 import sys
 import random
+import argparse
 from os.path import join as pjoin
 from config import Config
 
 
-from tqdm import tqdm
 import numpy as np
 from six.moves import xrange
 import tensorflow as tf
@@ -50,7 +50,7 @@ def read_dataset(dataset, tier, vocab):
     query_data = []
     question_uuid_data = []
 
-    for articles_id in tqdm(range(len(dataset['data'])), desc="Preprocessing {}".format(tier)):
+    for articles_id in range(len(dataset['data'])):
         article_paragraphs = dataset['data'][articles_id]['paragraphs']
         for pid in range(len(article_paragraphs)):
             context = article_paragraphs[pid]['context']
@@ -87,6 +87,7 @@ def prepare_dev(prefix, dev_filename, vocab):
     # Don't check file size, since we could be using other datasets
     dev_dataset = maybe_download(squad_base_url, dev_filename, prefix)
 
+    print(os.path.join(prefix, dev_filename))
     dev_data = data_from_json(os.path.join(prefix, dev_filename))
     context_data, question_data, question_uuid_data = read_dataset(dev_data, 'dev', vocab)
 
@@ -133,7 +134,7 @@ def generate_answers(sess, model, dataset, uuid_data, rev_vocab):
         curr_slice_st = i*sample_size
         curr_slice_en = min((i+1)*sample_size, num_points)
 
-        slice_sz = curr_slice_en - curr_slice_st 
+        slice_sz = curr_slice_en - curr_slice_st
 
         q_curr = q[curr_slice_st : curr_slice_en]
         c_curr = c[curr_slice_st : curr_slice_en]
@@ -179,7 +180,7 @@ def run_func2(dataset, config):
 
     qa = QASystem(encoder, decoder, embeddings, config)
     question_uuid_data = [i for i in xrange(len(a))]
-    
+
     with tf.Session() as sess:
         qa.initialize_model(sess, config.train_dir)
         answers, answers_canonical = generate_answers(sess, qa, dataset, question_uuid_data, rev_vocab)
@@ -196,17 +197,24 @@ def run_func2(dataset, config):
 def run_func():
     config = Config()
 
+    parser = argparse.ArgumentParser(
+        description='Prediction file')
+    parser.add_argument('input_file', help='Input file')
+    parser.add_argument('output_file', help='Output prediction File')
+    args = parser.parse_args()
+
     # ========= Load Dataset =========
     # You can change this code to load dataset in your own way
     vocab, rev_vocab = initialize_vocab(config.vocab_path)
 
-    dev_path = "data/squad/train-v1.1.json"
+    # dev_path = "data/squad/train-v1.1.json"
+    dev_path = args.input_file
     dev_dirname = os.path.dirname(os.path.abspath(dev_path))
     dev_filename = os.path.basename(dev_path)
     context_data, question_data, question_uuid_data = prepare_dev(dev_dirname, dev_filename, vocab)
 
 
-    
+
     ques_len = len(question_data)
     answers = [[0, 0] for _ in xrange(ques_len)]
 
@@ -221,12 +229,12 @@ def run_func():
     decoder = Decoder(config.hidden_state_size)
 
     qa = QASystem(encoder, decoder, embeddings, config)
-    
+
     with tf.Session() as sess:
         qa.initialize_model(sess, config.train_dir)
         answers, _ = generate_answers(sess, qa, dataset, question_uuid_data, rev_vocab)
         # write to json file to root dir
-        with io.open('dev-prediction.json', 'w', encoding='utf-8') as f:
+        with io.open(args.output_file, 'w', encoding='utf-8') as f:
             f.write(unicode(json.dumps(answers, ensure_ascii=False)))
 
 
