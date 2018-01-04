@@ -102,7 +102,13 @@ class Decoder(object):
         self.hidden_size = hidden_size
         self.init_weights = initializer
 
-
+    def softmax(self, target, axis, mask, epsilon=1e-12, name=None):
+        with tf.op_scope([target], name, 'softmax'):
+            max_axis = tf.reduce_max(target, axis, keep_dims=True)
+            target_exp = tf.exp(target - max_axis) * mask
+            normalize = tf.reduce_sum(target_exp, axis, keep_dims=True)
+            softmax = target_exp / (normalize + epsilon)
+            return softmax
 
     def run_lstm(self, encoded_rep, q_rep, masks):
         encoded_question, encoded_passage = encoded_rep
@@ -187,8 +193,11 @@ class Decoder(object):
         M = tf.matmul(h_doc, h_query, adjoint_b=True)
         M_mask = tf.to_float(tf.matmul(tf.expand_dims(masks_passage, -1), tf.expand_dims(masks_question, 1)))
 
-        alpha = tf.nn.softmax(M, 0)
-        beta = tf.nn.softmax(M, 1)
+        alpha = self.softmax(M, 1, M_mask)
+        beta = self.softmax(M, 2, M_mask)
+
+        #alpha = self.softmax(M, 0)
+        #beta = self.softmax(M, 1)
 
         # query_importance = tf.expand_dims(tf.reduce_mean(beta, reduction_indices=1), -1)
         query_importance = tf.expand_dims(tf.reduce_sum(beta, 1) / tf.to_float(tf.expand_dims(masks_passage, -1)), -1)
@@ -363,6 +372,7 @@ class QASystem(object):
             _word_embeddings = tf.Variable(self.embeddings, name="_word_embeddings", dtype=tf.float32, trainable= self.config.train_embeddings)
             question_emb = tf.nn.embedding_lookup(_word_embeddings, self.question_ids, name = "question") # (-1, Q, D)
             passage_emb = tf.nn.embedding_lookup(_word_embeddings, self.passage_ids, name = "passage") # (-1, P, D)
+
             # Apply dropout
             self.question = tf.nn.dropout(question_emb, self.dropout)
             self.passage  = tf.nn.dropout(passage_emb, self.dropout)
