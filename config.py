@@ -10,7 +10,7 @@ class Config:
     embed_path="data/squad/glove.trimmed.300.npz"
     dropout_val=0.25
     train_dir="src/models_lstm_basic"
-    type_of_decode=1  #1-Match LSTM, 2-Vanilla LSTM, 3-AoA
+    type_of_decode=3  #1-Match LSTM, 2-Vanilla LSTM, 3-AoA
 #    use_match=1
 
 

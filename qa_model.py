@@ -154,7 +154,47 @@ class Decoder(object):
 
         
         output_attender = tf.concat([output_attender_fw, output_attender_bw], axis = -1) # (-1, P, 2*H)
+
         return output_attender
+
+    def run_aoa(self, encoded_rep, q_rep, masks):
+        encoded_question, encoded_passage = encoded_rep
+        masks_question, masks_passage = masks
+
+        q_rep = tf.expand_dims(q_rep, 1)  # (batch_size, 1, D)
+        encoded_passage_shape = tf.shape(encoded_passage)[1]
+        q_rep = tf.tile(q_rep, [1, encoded_passage_shape, 1])
+
+
+        with tf.variable_scope('passage'):
+            fwd_cell = tf.nn.rnn_cell.GRUCell(self.hidden_size)
+            back_cell = tf.nn.rnn_cell.GRUCell(self.hidden_size)
+
+            h, _ = tf.nn.bidirectional_dynamic_rnn(
+                fwd_cell, back_cell, encoded_passage, sequence_length=tf.to_int64(masks_passage), dtype=tf.float32)
+            # h_doc = tf.nn.dropout(tf.concat(2, h), FLAGS.dropout_keep_prob)
+            h_doc = tf.concat(h, 2)
+
+        with tf.variable_scope('question'):
+            fwd_cell = tf.nn.rnn_cell.GRUCell(self.hidden_size)
+            back_cell = tf.nn.rnn_cell.GRUCell(self.hidden_size)
+
+            h, _ = tf.nn.bidirectional_dynamic_rnn(
+                fwd_cell, back_cell, encoded_question, sequence_length=tf.to_int64(masks_question), dtype=tf.float32)
+            # h_query = tf.nn.dropout(tf.concat(2, h), FLAGS.dropout_keep_prob)
+            h_query = tf.concat(h, 2)
+
+        M = tf.matmul(h_doc, h_query, adjoint_b=True)
+        M_mask = tf.to_float(tf.matmul(tf.expand_dims(masks_passage, -1), tf.expand_dims(masks_question, 1)))
+
+        alpha = tf.nn.softmax(M, 0)
+        beta = tf.nn.softmax(M, 1)
+
+        # query_importance = tf.expand_dims(tf.reduce_mean(beta, reduction_indices=1), -1)
+        query_importance = tf.expand_dims(tf.reduce_sum(beta, 1) / tf.to_float(tf.expand_dims(masks_passage, -1)), -1)
+
+        s = tf.matmul(alpha, query_importance)
+        return s
 
 
     def run_answer_ptr(self, output_attender, masks, labels):
@@ -174,7 +214,18 @@ class Decoder(object):
             answer_ptr_attender = AttentionWrapper(cell_answer_ptr, attention_mechanism_answer_ptr, cell_input_fn = answer_ptr_cell_input_fn)
             logits, _ = tf.nn.static_rnn(answer_ptr_attender, labels, dtype = tf.float32)
 
-        return logits 
+        return logits
+
+
+
+    def decode_aoa(self, encoded_rep, q_rep, masks, labels):
+        """
+            replace match-LSTM with Attention-over-Attention network
+        """
+        output_aoa = self.run_aoa(encoded_rep, q_rep, masks)
+        logits = self.run_answer_ptr(output_aoa, masks, labels)
+
+        return logits
 
 
 
@@ -338,13 +389,15 @@ class QASystem(object):
         encoded_question, encoded_passage, q_rep, p_rep = encoder.encode([self.question, self.passage], [self.question_lengths, self.passage_lengths],
                                                              encoder_state_input = None)
 
-        if self.config.use_match:
+        if self.config.type_of_decode == 1:
             self.logger.info("\n========Using Match LSTM=========\n")
             logits= decoder.decode([encoded_question, encoded_passage], q_rep, [self.question_lengths, self.passage_lengths], self.labels)
-        else:
+        elif self.config.type_of_decode == 2:
             self.logger.info("\n========Using Vanilla LSTM=========\n")
             logits = decoder.decode_lstm([encoded_question, encoded_passage], q_rep, [self.question_lengths, self.passage_lengths], self.labels)
-
+        else:
+            self.logger.info("\n========Using Attention-over-Attention Network=========\n")
+            logits = decoder.decode_aoa([encoded_question, encoded_passage], q_rep,[self.question_lengths, self.passage_lengths], self.labels)
 
         self.logits = logits
 
