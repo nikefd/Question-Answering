@@ -222,13 +222,13 @@ class Decoder(object):
         s_start = tf.squeeze(tf.matmul(alpha_start, query_importance_start))
         # s_start = tf.argmax(s_start, axis=-1)
 
-        M_end = tf.matmul(h_doc_start, h_query_start, adjoint_b=True)
+        M_end = tf.matmul(h_doc_end, h_query_end, adjoint_b=True)
 
         # alpha_end = self.softmax(M_end, 1, M_mask)
         # beta_end = self.softmax(M_end, 2, M_mask)
 
-        alpha_end = tf.nn.softmax(M_start, 0)
-        beta_end = tf.nn.softmax(M_start, 1)
+        alpha_end = tf.nn.softmax(M_end, 0)
+        beta_end = tf.nn.softmax(M_end, 1)
 
         query_importance_end = tf.expand_dims(tf.reduce_sum(beta_end, 1) / tf.to_float(tf.expand_dims(masks_passage, -1)), -1)
         s_end = tf.squeeze(tf.matmul(alpha_end, query_importance_end))
