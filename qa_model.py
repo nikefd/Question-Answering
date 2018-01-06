@@ -219,14 +219,14 @@ class Decoder(object):
         #beta = self.softmax(M, 1)
         query_importance_start = tf.expand_dims(tf.reduce_sum(beta_start, 1) / tf.to_float(tf.expand_dims(masks_passage, -1)), -1)
         s_start = tf.squeeze(tf.matmul(alpha_start, query_importance_start))
-        s_start = tf.argmax(s_start, axis=-1)
+        # s_start = tf.argmax(s_start, axis=-1)
 
         M_end = tf.matmul(h_doc_start, h_query_start, adjoint_b=True)
         alpha_end = self.softmax(M_end, 1, M_mask)
         beta_end = self.softmax(M_end, 2, M_mask)
         query_importance_end = tf.expand_dims(tf.reduce_sum(beta_end, 1) / tf.to_float(tf.expand_dims(masks_passage, -1)), -1)
         s_end = tf.squeeze(tf.matmul(alpha_end, query_importance_end))
-        s_end = tf.argmax(s_end, axis=-1)
+        # s_end = tf.argmax(s_end, axis=-1)
 
         s = [s_start, s_end]
         return s
@@ -442,12 +442,12 @@ class QASystem(object):
         self.logits are the 2 sets of logit (num_classes) values for each example, masked with float(-inf) beyond the true sequence length
         :return: Loss for the current batch of examples
         """
-        if self.config.type_of_decode == 3:
-            losses = tf.reduce_mean(-tf.reduce_sum(tf.to_float(self.logits[0]) * tf.log(tf.to_float(self.labels[:, 0])), reduction_indices=[1]))
-            losses += tf.reduce_mean(-tf.reduce_sum(tf.to_float(self.logits[1]) * tf.log(tf.to_float(self.labels[:, 1])), reduction_indices=[1]))
-        else:
-            losses = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits[0], labels=self.labels[:,0])
-            losses += tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits[1], labels=self.labels[:,1])
+        # if self.config.type_of_decode == 3:
+        #    losses = -tf.reduce_sum(tf.to_float(self.logits[0]) * tf.log(tf.to_float(self.labels[:, 0])), reduction_indices=[1])
+        #    losses += -tf.reduce_sum(tf.to_float(self.logits[1]) * tf.log(tf.to_float(self.labels[:, 1])), reduction_indices=[1])
+        # else:
+        losses = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits[0], labels=self.labels[:,0])
+        losses += tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits[1], labels=self.labels[:,1])
         self.loss = tf.reduce_mean(losses)
 
 
