@@ -171,7 +171,6 @@ class Decoder(object):
         encoded_passage_shape = tf.shape(encoded_passage)[1]
         q_rep = tf.tile(q_rep, [1, encoded_passage_shape, 1])
 
-
         with tf.variable_scope('passage_start'):
             fwd_cell = tf.nn.rnn_cell.GRUCell(self.hidden_size)
             back_cell = tf.nn.rnn_cell.GRUCell(self.hidden_size)
@@ -208,7 +207,6 @@ class Decoder(object):
             # h_query = tf.nn.dropout(tf.concat(2, h), FLAGS.dropout_keep_prob)
             h_query_end = tf.concat(h, 2)
 
-
         M_start = tf.matmul(h_doc_start, h_query_start, adjoint_b=True)
         M_mask = tf.to_float(tf.matmul(tf.expand_dims(masks_passage, -1), tf.expand_dims(masks_question, 1)))
 
@@ -218,7 +216,8 @@ class Decoder(object):
         alpha_start = tf.nn.softmax(M_start, 0)
         beta_start = tf.nn.softmax(M_start, 1)
 
-        query_importance_start = tf.expand_dims(tf.reduce_sum(beta_start, 1) / tf.to_float(tf.expand_dims(masks_passage, -1)), -1)
+        query_importance_start = tf.expand_dims(
+            tf.reduce_sum(beta_start, 1) / tf.to_float(tf.expand_dims(masks_passage, -1)), -1)
         s_start = tf.squeeze(tf.matmul(alpha_start, query_importance_start))
         # s_start = tf.argmax(s_start, axis=-1)
 
@@ -230,7 +229,8 @@ class Decoder(object):
         alpha_end = tf.nn.softmax(M_end, 0)
         beta_end = tf.nn.softmax(M_end, 1)
 
-        query_importance_end = tf.expand_dims(tf.reduce_sum(beta_end, 1) / tf.to_float(tf.expand_dims(masks_passage, -1)), -1)
+        query_importance_end = tf.expand_dims(
+            tf.reduce_sum(beta_end, 1) / tf.to_float(tf.expand_dims(masks_passage, -1)), -1)
         s_end = tf.squeeze(tf.matmul(alpha_end, query_importance_end))
         # s_end = tf.argmax(s_end, axis=-1)
 
@@ -350,7 +350,7 @@ class QASystem(object):
         Add train_op to self
         """
         with tf.variable_scope("train_step"):
-            adam_optimizer = tf.train.AdamOptimizer(0.0005)
+            adam_optimizer = tf.train.AdamOptimizer()
             grads, vars = zip(*adam_optimizer.compute_gradients(self.loss))
 
             clip_val = self.config.max_gradient_norm
@@ -544,6 +544,47 @@ class QASystem(object):
         q, c, a = zip(*[[_q, _c, _a] for (_q, _c, _a) in dataset])
 
         sample = len(dataset)
+
+        epoch_amount = int(sample / self.config.batch_size)
+        if epoch_amount * self.config.batch_size != sample:
+            epoch_amount += 1
+
+        em_score = 0
+        em_1 = 0
+        em_2 = 0
+        len_answers = 0
+        for eid in range(epoch_amount):
+            start_epoch = eid * self.config.batch_size
+            end_epoch = min((eid + 1) * self.config.batch_size, sample)
+
+            a_s, a_o = self.answer(session,
+                                      [q[start_epoch:end_epoch], c[start_epoch:end_epoch], a[start_epoch:end_epoch]])
+
+            answers = np.hstack([a_s.reshape([end_epoch - start_epoch, -1]), a_o.reshape([end_epoch - start_epoch,-1])])
+            gold_answers = np.array([a[_] for _ in range(start_epoch, end_epoch)])
+
+            for i in xrange(end_epoch - start_epoch):
+                gold_s, gold_e = gold_answers[i]
+                s, e = answers[i]
+                if (s == gold_s): em_1 += 1.0
+                if (e == gold_e): em_2 += 1.0
+                if (s == gold_s and e == gold_e):
+                    em_score += 1.0
+
+            len_answers += float(len(answers))
+
+        em_1 /= len_answers
+        em_2 /= len_answers
+        self.logger.info("\nExact match on 1st token: %5.4f | Exact match on 2nd token: %5.4f\n" % (em_1, em_2))
+
+        em_score /= len_answers
+
+        return em_score
+
+        """
+        q, c, a = zip(*[[_q, _c, _a] for (_q, _c, _a) in dataset])
+
+        sample = len(dataset)
         a_s, a_o = self.answer(session, [q, c, a])
         answers = np.hstack([a_s.reshape([sample, -1]), a_o.reshape([sample,-1])])
         gold_answers = np.array([a for (_,_, a) in dataset])
@@ -567,6 +608,7 @@ class QASystem(object):
         em_score /= float(len(answers))
 
         return em_score
+        """
 
 
     def run_epoch(self, session, train):
