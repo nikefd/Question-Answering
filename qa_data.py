@@ -28,13 +28,16 @@ def setup_args():
     parser = argparse.ArgumentParser()
     code_dir = os.path.join(os.path.dirname(os.path.realpath(__file__)))
     vocab_dir = os.path.join("data", "squad")
+    char_dir = os.path.join("data", "squad")
     glove_dir = os.path.join("download", "dwr")
     source_dir = os.path.join("data", "squad")
     parser.add_argument("--source_dir", default=source_dir)
     parser.add_argument("--glove_dir", default=glove_dir)
     parser.add_argument("--vocab_dir", default=vocab_dir)
+    parser.add_argument("--char_dir", default=char_dir)
     parser.add_argument("--glove_dim", default=300, type=int)
     parser.add_argument("--random_init", default=False, type=bool)
+    parser.add_argument("--char_count_th", default=50, type=int)
     return parser.parse_args()
 
 
@@ -116,6 +119,32 @@ def create_vocabulary(vocabulary_path, data_paths, tokenizer=None):
             for w in vocab_list:
                 vocab_file.write(w + b"\n")
 
+def create_character(character_path, char_count_th, data_paths, tokenizer=None):
+    if not gfile.Exists(character_path):
+        print("Creating vocabulary %s from data %s" % (character_path, str(data_paths)))
+        char = {}
+        for path in data_paths:
+            with open(path, mode="rb") as f:
+                counter = 0
+                for line in f:
+                    counter += 1
+                    if counter % 100000 == 0:
+                        print("processing line %d" % counter)
+                    tokens = tokenizer(line) if tokenizer else basic_tokenizer(line)
+                    for w in tokens:
+                        for c in w:
+                            if c in char:
+                                char[c] += 1
+                            else:
+                                char[c] = 1
+        for k, v in char.items():
+            if v < char_count_th:
+                del char[k]
+        char_list = _START_VOCAB + sorted(char, key=char.get, reverse=True)
+        print("Vocabulary size: %d" % len(char_list))
+        with gfile.GFile(char_path, mode="wb") as char_file:
+            for c in char_list:
+                char_file.write(c + b"\n")
 
 def sentence_to_token_ids(sentence, vocabulary, tokenizer=None):
     if tokenizer:
@@ -145,12 +174,18 @@ if __name__ == '__main__':
     args = setup_args()
     print(args)
     vocab_path = pjoin(args.vocab_dir, "vocab.dat")
+    char_path = pjoin(args.char_dir, "char.dat")
 
     train_path = pjoin(args.source_dir, "train")
     valid_path = pjoin(args.source_dir, "val")
     dev_path = pjoin(args.source_dir, "dev")
 
     create_vocabulary(vocab_path,
+                      [pjoin(args.source_dir, "train.context"),
+                       pjoin(args.source_dir, "train.question"),
+                       pjoin(args.source_dir, "val.context"),
+                       pjoin(args.source_dir, "val.question")])
+    create_character(char_path, args.char_count_th,
                       [pjoin(args.source_dir, "train.context"),
                        pjoin(args.source_dir, "train.question"),
                        pjoin(args.source_dir, "val.context"),
