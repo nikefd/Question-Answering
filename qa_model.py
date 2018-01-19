@@ -37,6 +37,40 @@ def _reverse(input_, seq_lengths, seq_dim, batch_dim):
     return array_ops.reverse(input_, axis=[seq_dim])
 
 
+def dropout(x, keep_prob, is_train, noise_shape=None, seed=None, name=None):
+    with tf.name_scope(name or "dropout"):
+        if keep_prob < 1.0:
+            d = tf.nn.dropout(x, keep_prob, noise_shape=noise_shape, seed=seed)
+            out = tf.cond(is_train, lambda: d, lambda: x)
+            return out
+        return x
+
+
+def conv1d(in_, filter_size, height, padding, is_train=None, keep_prob=1.0, scope=None):
+    with tf.variable_scope(scope or "conv1d"):
+        num_channels = in_.get_shape()[-1]
+        filter_ = tf.get_variable("filter", shape=[1, height, num_channels, filter_size], dtype='float')
+        bias = tf.get_variable("bias", shape=[filter_size], dtype='float')
+        strides = [1, 1, 1, 1]
+        if is_train is not None and keep_prob < 1.0:
+            in_ = dropout(in_, keep_prob, is_train)
+        xxc = tf.nn.conv2d(in_, filter_, strides, padding) + bias  # [N*M, JX, W/filter_stride, d]
+        out = tf.reduce_max(tf.nn.relu(xxc), 2)  # [-1, JX, d]
+        return out
+
+
+def multi_conv1d(in_, filter_sizes, heights, padding, is_train=None, keep_prob=1.0, scope=None):
+    with tf.variable_scope(scope or "multi_conv1d"):
+        assert len(filter_sizes) == len(heights)
+        outs = []
+        for filter_size, height in zip(filter_sizes, heights):
+            if filter_size == 0:
+                continue
+            out = conv1d(in_, filter_size, height, padding, is_train=is_train, keep_prob=keep_prob, scope="conv1d_{}".format(height))
+            outs.append(out)
+        concat_out = tf.concat(2, outs)
+        return concat_out
+
 
 class Encoder(object):
     def __init__(self, hidden_size, initializer = lambda : None):#tf.contrib.layers.xavier_initializer):
@@ -369,7 +403,7 @@ class QASystem(object):
         self.init = tf.global_variables_initializer()
 
 
-    def get_feed_dict(self, questions, contexts, answers, dropout_val):
+    def get_feed_dict(self, questions, contexts, answers, dict, dropout_val, is_train):
         """
         -arg questions: A list of list of ids representing the question sentence
         -arg contexts: A list of list of ids representing the context paragraph
@@ -381,14 +415,19 @@ class QASystem(object):
         padded_questions, question_lengths = pad_sequences(questions, 0)
         padded_contexts, passage_lengths = pad_sequences(contexts, 0)
 
+        padded_char_questions = word2char(padded_questions, dict)
+        padded_char_contexts = word2char(padded_contexts, dict)
 
         feed = {
             self.question_ids : padded_questions,
             self.passage_ids : padded_contexts,
+            self.question_char_ids: padded_char_questions,
+            self.passage_char_ids: padded_char_contexts,
             self.question_lengths : question_lengths,
             self.passage_lengths : passage_lengths,
             self.labels : answers,
-            self.dropout : dropout_val
+            self.dropout : dropout_val,
+            self.is_train : is_train
         }
 
         return feed
@@ -399,27 +438,55 @@ class QASystem(object):
             Create an embedding matrix (initialised with pretrained glove vectors and updated only if self.config.train_embeddings is true)
             lookup into this matrix and apply dropout (which is 1 at test time and self.config.dropout at train time)
         '''
+
+        VC = self.config.char_vocab_size
+        dc, dco = self.config.char_emb_size, self.config.char_out_size
+
         with tf.variable_scope("vocab_embeddings"):
             _word_embeddings = tf.Variable(self.embeddings, name="_word_embeddings", dtype=tf.float32, trainable= self.config.train_embeddings)
+
+            char_emb_mat = tf.get_variable("char_emb_mat", shape=[VC, dc], dtype='float')
+
+            passage_char_emb = tf.nn.embedding_lookup(char_emb_mat, self.passage_char_ids, name="passage")  # (-1, P, D, W)
+            question_char_emb = tf.nn.embedding_lookup(char_emb_mat, self.question_char_ids, name="question")  # (-1, Q, D, W)
+
+            filter_sizes = list(map(int, self.config.out_channel_dims.split(',')))
+            heights = list(map(int, self.config.filter_heights.split(',')))
+            assert sum(filter_sizes) == dco, (filter_sizes, dco)
+            with tf.variable_scope("conv"):
+                xx = multi_conv1d(passage_char_emb, filter_sizes, heights, "VALID", self.is_train, self.config.keep_prob, scope="xx")
+                if self.config.share_cnn_weights:
+                    tf.get_variable_scope().reuse_variables()
+                    qq = multi_conv1d(question_char_emb, filter_sizes, heights, "VALID", self.is_train, self.config.keep_prob, scope="xx")
+                else:
+                    qq = multi_conv1d(question_char_emb, filter_sizes, heights, "VALID", self.is_train, self.config.keep_prob, scope="qq")
+                xx = tf.reshape(xx, [-1, self.passage_char_ids.shape[1], dco])
+                qq = tf.reshape(qq, [-1, self.question_char_ids.shape[1], dco])
+
+            passage_emb = tf.nn.embedding_lookup(_word_embeddings, self.passage_ids, name="passage")  # (-1, P, D)
             question_emb = tf.nn.embedding_lookup(_word_embeddings, self.question_ids, name = "question") # (-1, Q, D)
-            passage_emb = tf.nn.embedding_lookup(_word_embeddings, self.passage_ids, name = "passage") # (-1, P, D)
+
+            passage_emb = tf.concat(2, [passage_emb, xx])
+            question_emb = tf.concat(2, [question_emb, qq])
 
             # Apply dropout
             self.question = tf.nn.dropout(question_emb, self.dropout)
             self.passage  = tf.nn.dropout(passage_emb, self.dropout)
             
 
-
-
     def setup_placeholders(self):
         self.question_ids = tf.placeholder(tf.int32, shape = [None, None], name = "question_ids")
+        self.question_char_ids = tf.placeholder(tf.int32, shape=[None, None, None], name="question_char_ids")
         self.passage_ids = tf.placeholder(tf.int32, shape = [None, None], name = "passage_ids")
+        self.passage_char_ids = tf.placeholder(tf.int32, shape=[None, None, None], name="passage_char_ids")
 
         self.question_lengths = tf.placeholder(tf.int32, shape=[None], name="question_lengths")
         self.passage_lengths = tf.placeholder(tf.int32, shape = [None], name = "passage_lengths")
 
         self.labels = tf.placeholder(tf.int32, shape = [None, 2], name = "gold_labels")
         self.dropout = tf.placeholder(tf.float32, shape=[], name = "dropout")
+
+        self.is_train = tf.placeholder('bool', [], name='is_train')
 
     def setup_system(self):
         """
@@ -476,7 +543,7 @@ class QASystem(object):
 
 
 
-    def test(self, session, valid):
+    def test(self, session, valid, dict):
         """
         valid: a list containing q, c and a.
         :return: loss on the valid dataset and the logit values
@@ -485,7 +552,7 @@ class QASystem(object):
         q, c, a = valid
 
         # at test time we do not perform dropout.
-        input_feed =  self.get_feed_dict(q, c, a, 1.0)
+        input_feed =  self.get_feed_dict(q, c, a, dict, 1.0, False)
 
         output_feed = [self.logits]
 
@@ -494,12 +561,12 @@ class QASystem(object):
         return outputs[0][0], outputs[0][1]
 
 
-    def answer(self, session, dataset):
+    def answer(self, session, dataset, dict):
         '''
             Get the answers for dataset. Independent of how data iteration is implemented
         '''
 
-        yp, yp2 = self.test(session, dataset)
+        yp, yp2 = self.test(session, dataset, dict)
         # -- Boundary Model with a max span restriction of 15
         
         def func(y1, y2):
@@ -531,7 +598,7 @@ class QASystem(object):
         return (np.array(a_s), np.array(a_e))
 
 
-    def evaluate_model(self, session, dataset):
+    def evaluate_model(self, session, dataset, dict):
         """
 
     
@@ -541,6 +608,7 @@ class QASystem(object):
         :return: exact match scores
         """
 
+        """
         q, c, a = zip(*[[_q, _c, _a] for (_q, _c, _a) in dataset])
 
         sample = len(dataset)
@@ -585,7 +653,7 @@ class QASystem(object):
         q, c, a = zip(*[[_q, _c, _a] for (_q, _c, _a) in dataset])
 
         sample = len(dataset)
-        a_s, a_o = self.answer(session, [q, c, a])
+        a_s, a_o = self.answer(session, [q, c, a], dict)
         answers = np.hstack([a_s.reshape([sample, -1]), a_o.reshape([sample,-1])])
         gold_answers = np.array([a for (_,_, a) in dataset])
 
@@ -608,10 +676,10 @@ class QASystem(object):
         em_score /= float(len(answers))
 
         return em_score
-        """
 
 
-    def run_epoch(self, session, train):
+
+    def run_epoch(self, session, train, dict):
         """
         Perform one complete pass over the training data and evaluate on dev
         """
@@ -623,7 +691,7 @@ class QASystem(object):
         for i, (q_batch, c_batch, a_batch) in enumerate(minibatches(train, self.config.batch_size)):
 
             # at training time, dropout needs to be on.
-            input_feed = self.get_feed_dict(q_batch, c_batch, a_batch, self.config.dropout_val)
+            input_feed = self.get_feed_dict(q_batch, c_batch, a_batch, dict, self.config.dropout_val, True)
 
             _, train_loss = session.run([self.train_op, self.loss], feed_dict=input_feed)
             prog.update(i + 1, [("train loss", train_loss)])
@@ -631,7 +699,7 @@ class QASystem(object):
 
 
 
-    def train(self, session, dataset, train_dir):
+    def train(self, session, dataset, dict, train_dir):
         """
         Implement main training loop
 
@@ -647,16 +715,17 @@ class QASystem(object):
 
         train, dev = dataset
 
-        em = self.evaluate_model(session, dev)
+        em = self.evaluate_model(session, dev, dict)
         self.logger.info("\n#-----------Initial Exact match on dev set: %5.4f ---------------#\n" %em)
         #self.logger.info("#-----------Initial F1 on dev set: %5.4f ---------------#" %f1)
 
         best_em = 0
+        self.config.char_vocab_size = len(dict[1])
 
         for epoch in xrange(self.config.num_epochs):
             self.logger.info("\n*********************EPOCH: %d*********************\n" %(epoch+1))
-            self.run_epoch(session, train)
-            em = self.evaluate_model(session, dev)
+            self.run_epoch(session, train, dict)
+            em = self.evaluate_model(session, dev, dict)
             self.logger.info("\n#-----------Exact match on dev set: %5.4f #-----------\n" %em)
             #self.logger.info("#-----------F1 on dev set: %5.4f #-----------" %f1)
 

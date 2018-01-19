@@ -78,7 +78,25 @@ def pad_sequences(sequences, pad_tok):
 
     return sequence_padded, sequence_length
 
+def word2char(sequences, dict):
 
+    max_length = 0
+    for sequence in sequences:
+        for word in sequence:
+            max_length = max(len(word), max_length)
+
+    res = np.zeros([sequences.shape[0], sequences.shape[1], max_length], dtype='int32')
+
+    char, vocab = dict
+
+    for i, sequence in enumerate(sequences):
+        for j, w in enumerate(sequence):
+            if w in vocab:
+                for k, c in enumerate(w):
+                    if c in char:
+                        res[i, j, k] = char[c]
+
+    return res
 
 
 def minibatches(data, minibatch_size):

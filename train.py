@@ -22,6 +22,17 @@ def initialize_vocab(vocab_path):
         raise ValueError("Vocabulary file %s not found.", vocab_path)
 
 
+def initialize_char(char_path):
+    if tf.gfile.Exists(char_path):
+        rev_char = []
+        with tf.gfile.GFile(char_path, mode="rb") as f:
+            rev_char.extend(f.readlines())
+        rev_char = [line.strip('\n') for line in rev_char]
+        char = dict([(x, y) for (y, x) in enumerate(rev_char)])
+        return char, rev_char
+    else:
+        raise ValueError("Character file %s not found.", char_path)
+
 
 def run_func():
     config = Config()
@@ -31,7 +42,9 @@ def run_func():
 
     embed_path = config.embed_path
     vocab_path = config.vocab_path
+    char_path = config.char_path
     vocab, rev_vocab = initialize_vocab(vocab_path)
+    char, rev_char = initialize_char(char_path)
 
     embeddings = get_trimmed_glove_vectors(embed_path)
 
@@ -44,7 +57,7 @@ def run_func():
     with tf.Session() as sess:
         # ====== Load a pretrained model if it exists or create a new one if no pretrained available ======
         qa.initialize_model(sess, config.train_dir)
-        qa.train(sess, [train, dev], config.train_dir)
+        qa.train(sess, [train, dev], [vocab, char], config.train_dir)
 
 
 
