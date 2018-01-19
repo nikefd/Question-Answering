@@ -608,7 +608,7 @@ class QASystem(object):
         :return: exact match scores
         """
 
-        """
+
         q, c, a = zip(*[[_q, _c, _a] for (_q, _c, _a) in dataset])
 
         sample = len(dataset)
@@ -626,7 +626,7 @@ class QASystem(object):
             end_epoch = min((eid + 1) * self.config.batch_size, sample)
 
             a_s, a_o = self.answer(session,
-                                      [q[start_epoch:end_epoch], c[start_epoch:end_epoch], a[start_epoch:end_epoch]])
+                                      [q[start_epoch:end_epoch], c[start_epoch:end_epoch], a[start_epoch:end_epoch]], dict)
 
             answers = np.hstack([a_s.reshape([end_epoch - start_epoch, -1]), a_o.reshape([end_epoch - start_epoch,-1])])
             gold_answers = np.array([a[_] for _ in range(start_epoch, end_epoch)])
@@ -676,7 +676,7 @@ class QASystem(object):
         em_score /= float(len(answers))
 
         return em_score
-
+        """
 
 
     def run_epoch(self, session, train, dict):
