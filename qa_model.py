@@ -68,7 +68,7 @@ def multi_conv1d(in_, filter_sizes, heights, padding, is_train=None, keep_prob=1
                 continue
             out = conv1d(in_, filter_size, height, padding, is_train=is_train, keep_prob=keep_prob, scope="conv1d_{}".format(height))
             outs.append(out)
-        concat_out = tf.concat(2, outs)
+        concat_out = tf.concat(outs, 2)
         return concat_out
 
 
@@ -460,14 +460,14 @@ class QASystem(object):
                     qq = multi_conv1d(question_char_emb, filter_sizes, heights, "VALID", self.is_train, self.config.keep_prob, scope="xx")
                 else:
                     qq = multi_conv1d(question_char_emb, filter_sizes, heights, "VALID", self.is_train, self.config.keep_prob, scope="qq")
-                xx = tf.reshape(xx, [-1, self.passage_char_ids.shape[1], dco])
-                qq = tf.reshape(qq, [-1, self.question_char_ids.shape[1], dco])
+            #    xx = tf.reshape(xx, [-1, self.passage_char_ids.shape[1], dco])
+            #    qq = tf.reshape(qq, [-1, self.question_char_ids.shape[1], dco])
 
             passage_emb = tf.nn.embedding_lookup(_word_embeddings, self.passage_ids, name="passage")  # (-1, P, D)
             question_emb = tf.nn.embedding_lookup(_word_embeddings, self.question_ids, name = "question") # (-1, Q, D)
 
-            passage_emb = tf.concat(2, [passage_emb, xx])
-            question_emb = tf.concat(2, [question_emb, qq])
+            passage_emb = tf.concat([passage_emb, xx], 2)
+            question_emb = tf.concat([question_emb, qq], 2)
 
             # Apply dropout
             self.question = tf.nn.dropout(question_emb, self.dropout)
