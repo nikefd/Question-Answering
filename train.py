@@ -52,12 +52,14 @@ def run_func():
     encoder = Encoder(config.hidden_state_size)
     decoder = Decoder(config.hidden_state_size)
 
+    config.char_vocab_size = len(char)
+
     qa = QASystem(encoder, decoder, embeddings, config)
     
     with tf.Session() as sess:
         # ====== Load a pretrained model if it exists or create a new one if no pretrained available ======
         qa.initialize_model(sess, config.train_dir)
-        qa.train(sess, [train, dev], [vocab, char], config.train_dir)
+        qa.train(sess, [train, dev], [vocab, rev_vocab, char, rev_char], config.train_dir)
 
 
 

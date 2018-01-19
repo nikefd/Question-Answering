@@ -78,23 +78,24 @@ def pad_sequences(sequences, pad_tok):
 
     return sequence_padded, sequence_length
 
+
 def word2char(sequences, dict):
+
+    vocab, rev_vocab, char, rev_char = dict
 
     max_length = 0
     for sequence in sequences:
         for word in sequence:
-            max_length = max(len(word), max_length)
+            max_length = max(len(rev_vocab[word]), max_length)
 
     res = np.zeros([sequences.shape[0], sequences.shape[1], max_length], dtype='int32')
-
-    char, vocab = dict
 
     for i, sequence in enumerate(sequences):
         for j, w in enumerate(sequence):
             if w in vocab:
                 for k, c in enumerate(w):
                     if c in char:
-                        res[i, j, k] = char[c]
+                        res[i, j, k] = rev_char[c]
 
     return res
 

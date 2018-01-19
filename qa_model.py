@@ -720,7 +720,6 @@ class QASystem(object):
         #self.logger.info("#-----------Initial F1 on dev set: %5.4f ---------------#" %f1)
 
         best_em = 0
-        self.config.char_vocab_size = len(dict[1])
 
         for epoch in xrange(self.config.num_epochs):
             self.logger.info("\n*********************EPOCH: %d*********************\n" %(epoch+1))
