@@ -41,6 +41,18 @@ def initialize_vocab(vocab_path):
         raise ValueError("Vocabulary file %s not found.", vocab_path)
 
 
+def initialize_char(char_path):
+    if tf.gfile.Exists(char_path):
+        rev_char = []
+        with tf.gfile.GFile(char_path, mode="rb") as f:
+            rev_char.extend(f.readlines())
+        rev_char = [line.strip('\n') for line in rev_char]
+        char = dict([(x, y) for (y, x) in enumerate(rev_char)])
+        return char, rev_char
+    else:
+        raise ValueError("Character file %s not found.", char_path)
+
+
 def read_dataset(dataset, tier, vocab):
     """Reads the dataset, extracts context, question, answer,
     and answer pointer in their own file. Returns the number
@@ -101,7 +113,7 @@ def prepare_dev(prefix, dev_filename, vocab):
     return context_data, question_data, question_uuid_data
 
 
-def generate_answers(sess, model, dataset, uuid_data, rev_vocab):
+def generate_answers(sess, model, dataset, uuid_data, rev_vocab, dict):
     """
     Loop over the dev or test dataset and generate answer.
 
@@ -140,7 +152,7 @@ def generate_answers(sess, model, dataset, uuid_data, rev_vocab):
         c_curr = c[curr_slice_st : curr_slice_en]
         a_curr = a[curr_slice_st : curr_slice_en]
 
-        s, e = model.answer(sess, [q_curr, c_curr, a_curr])
+        s, e = model.answer(sess, [q_curr, c_curr, a_curr], dict)
 
         for j in xrange(slice_sz):
             st_idx = s[j]
@@ -206,6 +218,8 @@ def run_func():
     # ========= Load Dataset =========
     # You can change this code to load dataset in your own way
     vocab, rev_vocab = initialize_vocab(config.vocab_path)
+    char, rev_char = initialize_char(config.char_path)
+
 
     # dev_path = "data/squad/train-v1.1.json"
     dev_path = args.input_file
@@ -228,11 +242,13 @@ def run_func():
     encoder = Encoder(config.hidden_state_size)
     decoder = Decoder(config.hidden_state_size)
 
+    config.char_vocab_size = len(char)
+
     qa = QASystem(encoder, decoder, embeddings, config)
 
     with tf.Session() as sess:
         qa.initialize_model(sess, config.train_dir)
-        answers, _ = generate_answers(sess, qa, dataset, question_uuid_data, rev_vocab)
+        answers, _ = generate_answers(sess, qa, dataset, question_uuid_data, rev_vocab, [vocab, rev_vocab, char, rev_char])
         # write to json file to root dir
         with io.open(args.output_file, 'w', encoding='utf-8') as f:
             f.write(unicode(json.dumps(answers, ensure_ascii=False)))
