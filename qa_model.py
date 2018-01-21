@@ -19,11 +19,11 @@ from evaluate import exact_match_score, f1_score
 from tensorflow.python import debug as tf_debug
 from tensorflow.python.ops import array_ops
 
-
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 
+from nn import highway_network, multi_conv1d
 
 logging.basicConfig(stream = sys.stdout, level=logging.INFO)
 
@@ -35,41 +35,6 @@ def _reverse(input_, seq_lengths, seq_dim, batch_dim):
         seq_dim=seq_dim, batch_dim=batch_dim)
   else:
     return array_ops.reverse(input_, axis=[seq_dim])
-
-
-def dropout(x, keep_prob, is_train, noise_shape=None, seed=None, name=None):
-    with tf.name_scope(name or "dropout"):
-        if keep_prob < 1.0:
-            d = tf.nn.dropout(x, keep_prob, noise_shape=noise_shape, seed=seed)
-            out = tf.cond(is_train, lambda: d, lambda: x)
-            return out
-        return x
-
-
-def conv1d(in_, filter_size, height, padding, is_train=None, keep_prob=1.0, scope=None):
-    with tf.variable_scope(scope or "conv1d"):
-        num_channels = in_.get_shape()[-1]
-        filter_ = tf.get_variable("filter", shape=[1, height, num_channels, filter_size], dtype='float')
-        bias = tf.get_variable("bias", shape=[filter_size], dtype='float')
-        strides = [1, 1, 1, 1]
-        if is_train is not None and keep_prob < 1.0:
-            in_ = dropout(in_, keep_prob, is_train)
-        xxc = tf.nn.conv2d(in_, filter_, strides, padding) + bias  # [N*M, JX, W/filter_stride, d]
-        out = tf.reduce_max(tf.nn.relu(xxc), 2)  # [-1, JX, d]
-        return out
-
-
-def multi_conv1d(in_, filter_sizes, heights, padding, is_train=None, keep_prob=1.0, scope=None):
-    with tf.variable_scope(scope or "multi_conv1d"):
-        assert len(filter_sizes) == len(heights)
-        outs = []
-        for filter_size, height in zip(filter_sizes, heights):
-            if filter_size == 0:
-                continue
-            out = conv1d(in_, filter_size, height, padding, is_train=is_train, keep_prob=keep_prob, scope="conv1d_{}".format(height))
-            outs.append(out)
-        concat_out = tf.concat(outs, 2)
-        return concat_out
 
 
 class Encoder(object):
@@ -468,6 +433,12 @@ class QASystem(object):
 
             passage_emb = tf.concat([passage_emb, xx], 2)
             question_emb = tf.concat([question_emb, qq], 2)
+
+            if self.config.highway:
+                with tf.variable_scope("highway"):
+                    passage_emb = highway_network(passage_emb, self.config.highway_num_layers, True, wd=self.config.wd, is_train=self.is_train)
+                    tf.get_variable_scope().reuse_variables()
+                    question_emb = highway_network(question_emb, self.config.highway_num_layers, True, wd=self.config.wd, is_train=self.is_train)
 
             # Apply dropout
             self.question = tf.nn.dropout(question_emb, self.dropout)

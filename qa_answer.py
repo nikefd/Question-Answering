@@ -136,7 +136,7 @@ def generate_answers(sess, model, dataset, uuid_data, rev_vocab, dict):
 
     q,c,a = dataset
     num_points = len(a)
-    sample_size = 1000
+    sample_size = 100
 
 
     answers_canonical = []
